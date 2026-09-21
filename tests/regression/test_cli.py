@@ -205,46 +205,125 @@ def test_cli_regression_lifecycle(tmp_path: Path) -> None:
     assert reg_id in res_show.output
 
 
-def test_cli_replay_command(tmp_path: Path) -> None:
+def _make_replay_report(reg_id: str, criterion_met: bool):
+    """Build a deterministic ReplayReport for CLI exit-code testing."""
+    from viveka.regression.models import ReplayReport
+
+    return ReplayReport(
+        regression_id=reg_id,
+        property_stable_key="src/search.py::knowledge_search->src/refund.py::refund_create",
+        property_revision=1,
+        historical_violations=3,
+        historical_no_observed_violations=0,
+        historical_inconclusive=0,
+        historical_not_applicable=0,
+        historical_runs=5,
+        historical_criterion_met=True,
+        current_violations=3 if criterion_met else 1,
+        current_no_observed_violations=2 if criterion_met else 4,
+        current_inconclusive=0,
+        current_not_applicable=0,
+        current_runs=5,
+        current_criterion_met=criterion_met,
+        observations=["Test observation."],
+    )
+
+
+def test_cli_replay_criterion_met(tmp_path: Path) -> None:
+    """Exit code 1 when current reproduction criterion is MET."""
     _prop, _world, reduction = setup_project(tmp_path)
 
     # Create regression first
     runner.invoke(app, ["regression", "create", reduction.reduction_id, "--path", str(tmp_path)])
+    from unittest.mock import patch
+
     from viveka.regression.store import RegressionStore
 
     regs = RegressionStore(tmp_path).load_all()
     reg_id = regs[0].regression_id
 
-    # Replay with target override
-    res_replay = runner.invoke(
-        app,
-        [
-            "replay",
-            reg_id,
-            "--path",
-            str(tmp_path),
-            "--target",
-            "viveka.demo.agent:run_demo_agent",
-        ],
-    )
-    assert res_replay.exit_code == 1
-    assert "Behavioral Regression Replay Report" in res_replay.output
-    assert "Historical" in res_replay.output
-    assert "Current" in res_replay.output
+    fake_report = _make_replay_report(reg_id, criterion_met=True)
 
-    # JSON output
-    res_json = runner.invoke(
-        app,
-        [
-            "replay",
-            reg_id,
-            "--path",
-            str(tmp_path),
-            "--target",
-            "viveka.demo.agent:run_demo_agent",
-            "--json",
-        ],
-    )
-    assert res_json.exit_code == 1
-    assert '"regression_id"' in res_json.output
-    assert '"observations"' in res_json.output
+    with patch("viveka.regression.replay.ReplayEngine.replay", return_value=fake_report):
+        # Text output
+        res_replay = runner.invoke(
+            app,
+            [
+                "replay",
+                reg_id,
+                "--path",
+                str(tmp_path),
+                "--target",
+                "viveka.demo.agent:run_demo_agent",
+            ],
+        )
+        assert res_replay.exit_code == 1
+        assert "Behavioral Regression Replay Report" in res_replay.output
+        assert "Historical" in res_replay.output
+        assert "Current" in res_replay.output
+
+        # JSON output
+        res_json = runner.invoke(
+            app,
+            [
+                "replay",
+                reg_id,
+                "--path",
+                str(tmp_path),
+                "--target",
+                "viveka.demo.agent:run_demo_agent",
+                "--json",
+            ],
+        )
+        assert res_json.exit_code == 1
+        assert '"regression_id"' in res_json.output
+        assert '"observations"' in res_json.output
+
+
+def test_cli_replay_criterion_not_met(tmp_path: Path) -> None:
+    """Exit code 0 when current reproduction criterion is NOT met."""
+    _prop, _world, reduction = setup_project(tmp_path)
+
+    # Create regression first
+    runner.invoke(app, ["regression", "create", reduction.reduction_id, "--path", str(tmp_path)])
+    from unittest.mock import patch
+
+    from viveka.regression.store import RegressionStore
+
+    regs = RegressionStore(tmp_path).load_all()
+    reg_id = regs[0].regression_id
+
+    fake_report = _make_replay_report(reg_id, criterion_met=False)
+
+    with patch("viveka.regression.replay.ReplayEngine.replay", return_value=fake_report):
+        # Text output
+        res_replay = runner.invoke(
+            app,
+            [
+                "replay",
+                reg_id,
+                "--path",
+                str(tmp_path),
+                "--target",
+                "viveka.demo.agent:run_demo_agent",
+            ],
+        )
+        assert res_replay.exit_code == 0
+        assert "Behavioral Regression Replay Report" in res_replay.output
+        assert "NOT MET" in res_replay.output
+
+        # JSON output
+        res_json = runner.invoke(
+            app,
+            [
+                "replay",
+                reg_id,
+                "--path",
+                str(tmp_path),
+                "--target",
+                "viveka.demo.agent:run_demo_agent",
+                "--json",
+            ],
+        )
+        assert res_json.exit_code == 0
+        assert '"current_criterion_met": false' in res_json.output
