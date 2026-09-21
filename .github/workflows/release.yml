@@ -58,6 +58,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write # Mandatory for OIDC Trusted Publishing
+      contents: read
     steps:
       - name: Download distribution artifacts
         uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
