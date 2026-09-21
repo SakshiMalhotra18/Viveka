@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@f94ec6bed567a21f369e50bd5228f7a15f64d88e # v5.3.0
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run test suite
+        run: uv run pytest --tb=short -q
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Validate tag and package version consistency
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PKG_VERSION=$(uv run python -c "from importlib.metadata import version; print(version('viveka-engine'))")
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "Error: Tag v${TAG} does not match pyproject package version ${PKG_VERSION}"
+            exit 1
+          fi
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: dist-packages
+          path: dist/
+          retention-days: 1
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # Mandatory for OIDC Trusted Publishing
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: dist-packages
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@76f52e6605553ce96f9e23003c7ab4f5f2c6396f # v1.12.4
+        with:
+          packages-dir: dist/

@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# uv / pip
+.venv/
+venv/
+.uv/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checkers
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# VIVEKA project state — shared config and approved properties are committed,
+# but NOT secrets, SQLite DBs, or generated runtime evidence directories.
+.viveka/*.db
+.viveka/traces/
+.viveka/runs/
+.viveka/worlds/
+.viveka/reductions/
+.viveka/evaluations/
+.viveka/diagnoses/
+.viveka/regressions/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Environment / secrets — never committed
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+secrets*
