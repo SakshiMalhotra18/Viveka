@@ -20,7 +20,7 @@ from viveka.runtime.vocabulary import RuntimeAdapterType
 from viveka.verification.engine import VerificationEngine
 from viveka.verification.vocabulary import PropertyVerificationStatus, VerificationOutcome
 
-REF_SERVER = str(Path(__file__).parent / "reference_mcp_server.py")
+REF_SERVER = str((Path(__file__).parent / "reference_mcp_server.py").resolve())
 PYTHON_EXE = sys.executable
 
 
