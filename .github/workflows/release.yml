@@ -30,7 +30,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run test suite
-        run: uv run pytest --tb=short -q
+        run: uv run pytest -ra
 
       - name: Build distributions
         run: uv build
