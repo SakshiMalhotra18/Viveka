@@ -147,4 +147,4 @@ class ReasoningProvenance(BaseModel):
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(UTC), description="UTC timestamp."
     )
-    viveka_version: str = Field(default="0.1.0", description="VIVEKA version at generation time.")
+    viveka_version: str = Field(default="0.1.1", description="VIVEKA version at generation time.")

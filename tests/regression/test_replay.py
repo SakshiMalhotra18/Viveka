@@ -107,7 +107,7 @@ def make_valid_regression():
         reproduction_policy=policy,
         historical_reproduction=repro,
         representative_evidence=[],
-        viveka_version="0.1.0",
+        viveka_version="0.1.1",
     )
 
 

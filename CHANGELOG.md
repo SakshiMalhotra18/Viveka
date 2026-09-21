@@ -9,6 +9,12 @@ VIVEKA uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-09-21
+
+### Fixed
+- Release publication workflow: First successfully prepared public package release after initial v0.1.0 tag deployment issue.
+- Resolved CLI replay test non-determinism in test suite.
+
 ## [0.1.0] — 2026-09-18
 
 ### Added
