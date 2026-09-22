@@ -40,7 +40,7 @@ def get_viveka_version() -> str:
     try:
         return importlib.metadata.version("viveka-engine")
     except Exception:
-        return "0.1.1"
+        return "0.1.2"
 
 
 class RegressionEngine:

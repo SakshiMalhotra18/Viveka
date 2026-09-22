@@ -85,7 +85,7 @@ def make_fixture_regression() -> BehavioralRegression:
                 evidence=[],
             )
         ],
-        viveka_version="0.1.1",
+        viveka_version="0.1.2",
     )
 
 

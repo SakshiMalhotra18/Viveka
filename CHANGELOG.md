@@ -9,6 +9,12 @@ VIVEKA uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-09-22
+
+### Fixed
+- Updated PyPI publishing action to support current Core Metadata (Metadata-Version 2.5).
+- No behavioral verification semantics changed.
+
 ## [0.1.1] — 2026-09-21
 
 ### Fixed
