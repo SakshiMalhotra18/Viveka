@@ -474,6 +474,7 @@ for JUnit mapping, GitLab CI examples, and JSON+JUnit coexistence.
 
 ```python
 import viveka
+
 print(viveka.__version__)
 ```
 
@@ -575,7 +576,7 @@ results, and reduction artifacts may contain sensitive agent output.
 
 | | |
 |---|---|
-| **Current release** | 0.1.2 |
+| **Current release** | 0.1.3 |
 | **Status** | Early public release (pre-1.0) |
 | **Python** | ≥ 3.12 |
 | **License** | MIT |

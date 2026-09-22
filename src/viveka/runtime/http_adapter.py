@@ -166,7 +166,7 @@ class HttpJsonRuntimeAdapter(BaseRuntimeAdapter):
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "VIVEKA-Engine/0.1.2",
+            "User-Agent": "VIVEKA-Engine/0.1.3",
         }
 
         if self.auth_header_env:

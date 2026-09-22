@@ -9,6 +9,15 @@ VIVEKA uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-09-22
+
+### Changed
+- Improved public README and PyPI long description.
+- Added concrete Property and World examples, real CLI quickstart, and installation guidance.
+- Fixed PyPI-safe documentation links (absolute GitHub URLs).
+- Updated development classifier from Pre-Alpha to Alpha.
+- No behavioral verification semantics changed.
+
 ## [0.1.2] — 2026-09-22
 
 ### Fixed
