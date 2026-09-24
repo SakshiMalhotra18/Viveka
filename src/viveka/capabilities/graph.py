@@ -236,7 +236,175 @@ def build_capability_graph(
         )
 
     # -----------------------------------------------------------------------
-    # 7. possible_interaction edges between capability-bearing symbols
+    # 7. LangGraph node registrations & workflow edges
+    # -----------------------------------------------------------------------
+    node_name_to_sym: dict[str, str] = {}
+
+    for module in static_result.modules:
+        if module.parse_status != "ok":
+            continue
+
+        all_calls = list(module.calls)
+        for fn in module.functions:
+            all_calls.extend(fn.calls)
+        for cls in module.classes:
+            for meth in cls.methods:
+                all_calls.extend(meth.calls)
+
+        # 1. First pass: find add_node calls
+        for call in all_calls:
+            if call.callee.endswith(".add_node") or call.callee == "add_node":
+                if len(call.positional_args) >= 2:
+                    node_name = call.positional_args[0].strip("'\"")
+                    callable_expr = call.positional_args[1].strip()
+                elif len(call.positional_args) == 1:
+                    node_name = call.positional_args[0].strip("'\"")
+                    callable_expr = node_name
+                else:
+                    continue
+
+                callable_sym = callable_expr.split(".")[-1]
+                sym_id = _symbol_node_id(callable_sym)
+                if sym_id not in nodes:
+                    matched = False
+                    for nid in nodes:
+                        if nid.endswith(f":{callable_sym}") or nid == f"sym:{callable_expr}":
+                            sym_id = nid
+                            matched = True
+                            break
+                    if not matched:
+                        nodes[sym_id] = GraphNode(
+                            id=sym_id,
+                            label=callable_sym,
+                            node_type="symbol",
+                            file_path=module.path,
+                            line=call.line,
+                        )
+
+                node_name_to_sym[node_name] = sym_id
+
+                ep_found = False
+                for ep in static_result.entrypoint_candidates:
+                    if ep.entrypoint_type == "stategraph" and ep.file_path == module.path:
+                        ep_id = _entrypoint_node_id(ep.symbol_or_path, ep.entrypoint_type)
+                        edges.append(
+                            GraphEdge(
+                                source=ep_id,
+                                target=sym_id,
+                                edge_type="exposes",
+                                evidence=f"LangGraph registered node '{node_name}' -> {callable_expr}",
+                                confidence="high",
+                            )
+                        )
+                        ep_found = True
+
+                if not ep_found:
+                    ep_symbol = call.containing_symbol or "StateGraph"
+                    ep_id = _entrypoint_node_id(ep_symbol, "stategraph")
+                    if ep_id not in nodes:
+                        nodes[ep_id] = GraphNode(
+                            id=ep_id,
+                            label=f"StateGraph ({ep_symbol})",
+                            node_type="entrypoint",
+                            file_path=module.path,
+                            line=call.line,
+                            properties={"entrypoint_type": "stategraph", "confidence": "high"},
+                        )
+                    edges.append(
+                        GraphEdge(
+                            source=ep_id,
+                            target=sym_id,
+                            edge_type="exposes",
+                            evidence=f"LangGraph registered node '{node_name}' -> {callable_expr}",
+                            confidence="high",
+                        )
+                    )
+
+        # 2. Second pass: find add_edge and add_conditional_edges calls
+        for call in all_calls:
+            if call.callee.endswith(".add_edge") or call.callee == "add_edge":
+                if len(call.positional_args) >= 2:
+                    src_node = call.positional_args[0].strip("'\"")
+                    tgt_node = call.positional_args[1].strip("'\"")
+                    src_sym_id = node_name_to_sym.get(src_node)
+                    tgt_sym_id = node_name_to_sym.get(tgt_node)
+                    if src_sym_id and tgt_sym_id and src_sym_id != tgt_sym_id:
+                        edges.append(
+                            GraphEdge(
+                                source=src_sym_id,
+                                target=tgt_sym_id,
+                                edge_type="calls",
+                                evidence=f"LangGraph workflow edge: {src_node} -> {tgt_node}",
+                                confidence="high",
+                            )
+                        )
+
+            elif (
+                call.callee.endswith(".add_conditional_edges")
+                or call.callee == "add_conditional_edges"
+            ):
+                if len(call.positional_args) >= 2:
+                    import re
+
+                    src_node = call.positional_args[0].strip("'\"")
+                    src_sym_id = node_name_to_sym.get(src_node)
+
+                    # Extract router function if present
+                    router_expr = call.positional_args[1].strip()
+                    router_sym = router_expr.split(".")[-1]
+                    router_sym_id = node_name_to_sym.get(router_sym) or _symbol_node_id(router_sym)
+                    if router_sym_id not in nodes:
+                        for nid in nodes:
+                            if nid.endswith(f":{router_sym}"):
+                                router_sym_id = nid
+                                break
+                        else:
+                            router_sym_id = None
+
+                    # If source and router exist, link src -> router
+                    if src_sym_id and router_sym_id and src_sym_id != router_sym_id:
+                        edges.append(
+                            GraphEdge(
+                                source=src_sym_id,
+                                target=router_sym_id,
+                                edge_type="calls",
+                                evidence=f"LangGraph conditional route: {src_node} -> {router_sym}",
+                                confidence="high",
+                            )
+                        )
+
+                    # Extract candidate target nodes from arguments
+                    all_target_names: list[str] = []
+                    for arg_str in call.positional_args[1:]:
+                        quoted_names = re.findall(r"['\"]([^'\"]+)['\"]", arg_str)
+                        all_target_names.extend(quoted_names)
+
+                    for tgt_node in all_target_names:
+                        tgt_sym_id = node_name_to_sym.get(tgt_node)
+                        if tgt_sym_id:
+                            if src_sym_id and src_sym_id != tgt_sym_id:
+                                edges.append(
+                                    GraphEdge(
+                                        source=src_sym_id,
+                                        target=tgt_sym_id,
+                                        edge_type="calls",
+                                        evidence=f"LangGraph conditional edge: {src_node} -> {tgt_node}",
+                                        confidence="high",
+                                    )
+                                )
+                            if router_sym_id and router_sym_id != tgt_sym_id:
+                                edges.append(
+                                    GraphEdge(
+                                        source=router_sym_id,
+                                        target=tgt_sym_id,
+                                        edge_type="calls",
+                                        evidence=f"LangGraph conditional edge router: {router_sym} -> {tgt_node}",
+                                        confidence="high",
+                                    )
+                                )
+
+    # -----------------------------------------------------------------------
+    # 8. possible_interaction edges between capability-bearing symbols
     # -----------------------------------------------------------------------
     # For each entrypoint, link it to tools it might invoke (same file or
     # via import graph) as "possible_interaction".

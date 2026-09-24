@@ -47,6 +47,7 @@ _PRIVILEGED_SINK_TAGS: frozenset[CapabilityTag] = frozenset(
         CapabilityTag.DESTRUCTIVE_WRITE,
         CapabilityTag.SHELL_EXECUTION,
         CapabilityTag.CODE_EXECUTION,
+        CapabilityTag.DATABASE_WRITE,
     }
 )
 

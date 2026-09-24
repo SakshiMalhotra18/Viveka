@@ -119,13 +119,18 @@ def detect_entrypoint_candidates(modules: list[PythonModule]) -> list[EntryPoint
                         )
                     )
 
-        # 2. StateGraph creation in module calls (High confidence)
-        for call in mod.calls:
-            if "StateGraph" in call.callee:
+        # 2. StateGraph / MCP server creation in module or function calls (High confidence)
+        all_calls = list(mod.calls)
+        for fn in all_functions:
+            all_calls.extend(fn.calls)
+
+        for call in all_calls:
+            if "StateGraph" in call.callee or "MessageGraph" in call.callee:
+                ep_symbol = call.containing_symbol or "StateGraph"
                 candidates.append(
                     EntryPointCandidate(
                         entrypoint_type="stategraph",
-                        symbol_or_path="StateGraph",
+                        symbol_or_path=ep_symbol,
                         file_path=mod.path,
                         line=call.line,
                         evidence=f"instantiation {call.callee}(...)",

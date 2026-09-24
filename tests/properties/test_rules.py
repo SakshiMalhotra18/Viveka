@@ -36,3 +36,27 @@ class TestPropertyRulesRegistry:
     def test_no_arbitrary_severity_scores_on_rules(self) -> None:
         for rule in PROPERTY_RULES:
             assert not hasattr(rule, "severity")
+
+    def test_db_untrusted_rule_allowed_exceptions(self) -> None:
+        """PROP-RULE-DB-UNTRUSTED-001 must only permit human_approval, not schema_validation."""
+        rule = PROPERTY_RULES_BY_ID["PROP-RULE-DB-UNTRUSTED-001"]
+        assert rule.unless == ("human_approval",)
+
+    def test_schema_validation_not_present_in_any_rule(self) -> None:
+        """Generic schema_validation must not appear as an allowed exception in any Property rule."""
+        for rule in PROPERTY_RULES:
+            assert "schema_validation" not in rule.unless
+
+    def test_all_rule_exceptions_exact(self) -> None:
+        """Verify the exact allowed exceptions across all V1 Property rules."""
+        expected_unless = {
+            "PROP-RULE-RET-FIN-001": ("explicit_user_authorization", "human_approval"),
+            "PROP-RULE-RET-SHELL-001": ("explicit_user_authorization",),
+            "PROP-RULE-RET-DEL-001": ("explicit_user_authorization",),
+            "PROP-RULE-SEC-EXT-001": ("explicit_user_authorization",),
+            "PROP-RULE-COMM-AUTH-001": ("explicit_user_authorization",),
+            "PROP-RULE-DB-UNTRUSTED-001": ("human_approval",),
+            "PROP-RULE-FAIL-SILENT-001": (),
+        }
+        actual_unless = {r.id: r.unless for r in PROPERTY_RULES}
+        assert actual_unless == expected_unless

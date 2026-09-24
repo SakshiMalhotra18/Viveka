@@ -8,9 +8,15 @@ under strict interaction evidence requirements to produce candidate properties.
 from __future__ import annotations
 
 import re
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 
-from viveka.capabilities.models import Capability, CapabilityAnalysisResult
+from viveka.capabilities.models import (
+    Capability,
+    CapabilityAnalysisResult,
+    CapabilityGraph,
+    GraphEdge,
+)
 from viveka.capabilities.vocabulary import CapabilityTag
 from viveka.core.ids import new_id
 from viveka.properties.models import (
@@ -59,6 +65,42 @@ def _slugify(text: str) -> str:
     return re.sub(r"[-\s]+", "-", text)
 
 
+def _find_directed_path(
+    graph: CapabilityGraph,
+    start_ids: set[str],
+    end_ids: set[str],
+) -> list[GraphEdge] | None:
+    """Find a directed forward path from any start ID to any end ID using BFS.
+
+    Traverses forward along directed edges ('calls', 'flow', 'workflow_edge').
+    """
+    adj: dict[str, list[tuple[str, GraphEdge]]] = defaultdict(list)
+    allowed_edge_types = {"calls", "flow", "workflow_edge"}
+
+    for edge in graph.edges:
+        if edge.edge_type in allowed_edge_types:
+            adj[edge.source].append((edge.target, edge))
+
+    queue: deque[tuple[str, list[GraphEdge]]] = deque()
+    visited: set[str] = set()
+
+    for start in start_ids:
+        queue.append((start, []))
+        visited.add(start)
+
+    while queue:
+        curr, path = queue.popleft()
+        if curr in end_ids and path:
+            return path
+
+        for nxt, edge in adj.get(curr, []):
+            if nxt not in visited:
+                visited.add(nxt)
+                queue.append((nxt, [*path, edge]))
+
+    return None
+
+
 def _has_strong_interaction(
     analysis: CapabilityAnalysisResult,
     src_cap: Capability,
@@ -66,107 +108,90 @@ def _has_strong_interaction(
 ) -> tuple[bool, list[PropertyEvidenceRef]]:
     """Determine whether strong interaction evidence links src_cap and sink_cap.
 
-    Co-location in the same module may corroborate an interaction, but will
-    NOT independently trigger a cross-capability property. A confirmed graph
-    path, shared reachable workflow context, or trust-boundary flow is strictly
-    required.
+    Requires either:
+    1. A directed forward path in CapabilityGraph from src_cap to sink_cap (calls/workflow edges).
+    2. Both src_cap and sink_cap are exposed tools connected across verified trust boundaries.
+    Co-location in the same file or module does NOT independently satisfy interaction.
     """
     evidence: list[PropertyEvidenceRef] = []
     src_sym = src_cap.source_symbol
     sink_sym = sink_cap.source_symbol
 
-    # 1. Check direct edges in CapabilityGraph
-    src_node_id = f"sym:{src_sym}"
-    sink_node_id = f"sym:{sink_sym}"
+    start_ids = {
+        f"sym:{src_sym}",
+        src_sym,
+        src_sym.split(".")[-1],
+        f"sym:{src_sym.split('.')[-1]}",
+    }
+    end_ids = {
+        f"sym:{sink_sym}",
+        sink_sym,
+        sink_sym.split(".")[-1],
+        f"sym:{sink_sym.split('.')[-1]}",
+    }
 
-    for edge in analysis.graph.edges:
-        if (edge.source in (src_node_id, src_sym) and edge.target in (sink_node_id, sink_sym)) or (
-            edge.source in (sink_node_id, sink_sym) and edge.target in (src_node_id, src_sym)
-        ):
-            evidence.append(
-                PropertyEvidenceRef(
-                    evidence_type=PropertyEvidenceType.GRAPH_PATH,
-                    source_id=f"{edge.source}->{edge.target}",
-                    description=f"Static capability graph edge: {edge.edge_type} ({edge.evidence})",
-                    file_path=src_cap.source_file,
-                    line=src_cap.source_line,
-                )
-            )
-            return True, evidence
-
-    # 2. Check workflow/entrypoint reachability (e.g. entrypoint reaches both or possible_interaction)
-    # If both symbols are registered tools in the graph, check if an entrypoint interacts with both
-    tool_nodes = {n.id: n for n in analysis.graph.nodes if n.node_type == "tool"}
-    ep_nodes = {n.id: n for n in analysis.graph.nodes if n.node_type == "entrypoint"}
-
-    if (src_node_id in tool_nodes or src_sym in tool_nodes) and (
-        sink_node_id in tool_nodes or sink_sym in tool_nodes
-    ):
-        # Check if an entrypoint has interactions with both
-        for ep_id in ep_nodes:
-            has_src = any(
-                e.source == ep_id and e.target in (src_node_id, src_sym)
-                for e in analysis.graph.edges
-            )
-            has_sink = any(
-                e.source == ep_id and e.target in (sink_node_id, sink_sym)
-                for e in analysis.graph.edges
-            )
-            if has_src and has_sink:
-                evidence.append(
-                    PropertyEvidenceRef(
-                        evidence_type=PropertyEvidenceType.GRAPH_PATH,
-                        source_id=ep_id,
-                        description=f"Shared workflow entrypoint reachability: {ep_id}",
-                        file_path=src_cap.source_file,
-                        line=None,
-                    )
-                )
-                return True, evidence
-
-    # 3. Check Trust Boundary flow (untrusted ingress -> agent:context -> privileged/external sink)
-    ingress_boundaries = [
-        tb
-        for tb in analysis.trust_boundaries
-        if tb.boundary_type == "untrusted_ingress" and tb.destination == "agent:context"
-    ]
-    sink_boundaries = [
-        tb
-        for tb in analysis.trust_boundaries
-        if tb.boundary_type in ("privileged_sink", "external_sink") and tb.source == "agent:context"
-    ]
-
-    # If src_cap is linked to an untrusted ingress and sink_cap is linked to a sink boundary
-    src_in_ingress = (
-        any(
-            src_sym in tb.evidence
-            or any(src_sym in ev for ev in tb.evidence)
-            or tb.source == f"sym:{src_sym}"
-            or tb.source == src_sym
-            for tb in ingress_boundaries
-        )
-        or src_cap.trust_role.value == "untrusted_ingress"
-    )
-
-    sink_in_sink = any(
-        sink_sym in tb.evidence
-        or any(sink_sym in ev for ev in tb.evidence)
-        or tb.destination == f"sym:{sink_sym}"
-        or tb.destination == sink_sym
-        for tb in sink_boundaries
-    ) or sink_cap.trust_role.value in ("privileged_sink", "external_sink")
-
-    if ingress_boundaries and sink_boundaries and src_in_ingress and sink_in_sink:
+    # 1. Check for directed forward path in the capability graph
+    directed_path = _find_directed_path(analysis.graph, start_ids, end_ids)
+    if directed_path:
+        path_str = " -> ".join([e.source for e in directed_path] + [directed_path[-1].target])
         evidence.append(
             PropertyEvidenceRef(
-                evidence_type=PropertyEvidenceType.TRUST_BOUNDARY,
-                source_id=f"{ingress_boundaries[0].id}->{sink_boundaries[0].id}",
-                description="Reachable path across verified untrusted ingress and privileged/external sink boundaries",
+                evidence_type=PropertyEvidenceType.GRAPH_PATH,
+                source_id=f"{src_sym}->{sink_sym}",
+                description=f"Directed capability graph path: {path_str}",
                 file_path=src_cap.source_file,
-                line=None,
+                line=src_cap.source_line,
             )
         )
         return True, evidence
+
+    # 2. Check for exposed agent tool interaction across trust boundaries
+    tool_node_ids = {n.id for n in analysis.graph.nodes if n.node_type == "tool"} | {
+        n.label for n in analysis.graph.nodes if n.node_type == "tool"
+    }
+    is_tool_flow = bool(start_ids & tool_node_ids) and bool(end_ids & tool_node_ids)
+
+    if is_tool_flow:
+        ingress_boundaries = [
+            tb
+            for tb in analysis.trust_boundaries
+            if tb.boundary_type == "untrusted_ingress" and tb.destination == "agent:context"
+        ]
+        sink_boundaries = [
+            tb
+            for tb in analysis.trust_boundaries
+            if tb.boundary_type in ("privileged_sink", "external_sink")
+            and tb.source == "agent:context"
+        ]
+
+        src_in_ingress = (
+            any(
+                src_sym in tb.evidence
+                or any(src_sym in ev for ev in tb.evidence)
+                or tb.source in start_ids
+                for tb in ingress_boundaries
+            )
+            or src_cap.trust_role.value == "untrusted_ingress"
+        )
+
+        sink_in_sink = any(
+            sink_sym in tb.evidence
+            or any(sink_sym in ev for ev in tb.evidence)
+            or tb.destination in end_ids
+            for tb in sink_boundaries
+        ) or sink_cap.trust_role.value in ("privileged_sink", "external_sink")
+
+        if ingress_boundaries and sink_boundaries and src_in_ingress and sink_in_sink:
+            evidence.append(
+                PropertyEvidenceRef(
+                    evidence_type=PropertyEvidenceType.TRUST_BOUNDARY,
+                    source_id=f"{ingress_boundaries[0].id}->{sink_boundaries[0].id}",
+                    description="Reachable agent tool invocation flow across verified trust boundaries",
+                    file_path=src_cap.source_file,
+                    line=None,
+                )
+            )
+            return True, evidence
 
     return False, []
 

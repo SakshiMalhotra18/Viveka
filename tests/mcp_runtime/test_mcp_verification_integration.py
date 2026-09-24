@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from viveka.core.config import load_config
-from viveka.evaluation.models import ReproductionPolicy
+from viveka.evaluation.models import ReproductionPolicy, RuntimeCapabilityBinding
 from viveka.properties.models import FailureHandledOracle, FlowForbiddenOracle, Property
 from viveka.properties.store import PropertyStore
 from viveka.properties.vocabulary import PropertyStatus
@@ -54,14 +54,23 @@ def test_verification_engine_e2e_with_mcp_target(tmp_path: Path) -> None:
         },
     )
 
+    binding = RuntimeCapabilityBinding(
+        bindings={
+            "knowledge_search": "knowledge.search",
+            "refund_create": "refund.create",
+        }
+    )
+
     engine = VerificationEngine(project_root=project_dir, property_store=prop_store)
     result = engine.verify(
         max_worlds_per_property=2,
         target_spec=mcp_target,
+        binding=binding,
         policy=ReproductionPolicy(runs=2, minimum_violations=1),
     )
 
-    # Output-only non-instrumented MCP target produces INCONCLUSIVE, outcome NO_REPRODUCED_VIOLATIONS
+    # Output-only non-instrumented MCP target produces INCONCLUSIVE,
+    # therefore no reproduced violation is established.
     assert result.outcome == VerificationOutcome.NO_REPRODUCED_VIOLATIONS
     assert result.properties_verified == 1
     assert result.property_results[0].status == PropertyVerificationStatus.INCONCLUSIVE
@@ -87,6 +96,9 @@ def test_verification_engine_e2e_with_mcp_config(tmp_path: Path) -> None:
                     "tool": "agent.run",
                     "timeout_seconds": 10.0,
                 },
+                "capability_bindings": {
+                    "knowledge_search": "knowledge.search",
+                },
             }
         ),
         encoding="utf-8",
@@ -108,7 +120,11 @@ def test_verification_engine_e2e_with_mcp_config(tmp_path: Path) -> None:
     )
     prop_store.save(prop)
 
-    engine = VerificationEngine(project_root=project_dir, property_store=prop_store, config=config)
+    engine = VerificationEngine(
+        project_root=project_dir,
+        property_store=prop_store,
+        config=config,
+    )
     result = engine.verify(
         max_worlds_per_property=1,
         policy=ReproductionPolicy(runs=2, minimum_violations=1),

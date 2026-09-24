@@ -183,6 +183,7 @@ class VivekaConfig(BaseModel):
     shrinking: ShrinkingConfig = Field(default_factory=ShrinkingConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    capability_bindings: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("version")
     @classmethod
@@ -193,6 +194,22 @@ class VivekaConfig(BaseModel):
                 "Only version 1 is supported by this release of VIVEKA."
             )
         return v
+
+    @field_validator("capability_bindings")
+    @classmethod
+    def validate_capability_bindings(cls, v: dict[str, str]) -> dict[str, str]:
+        cleaned: dict[str, str] = {}
+        for key, val in v.items():
+            if not isinstance(key, str) or not isinstance(val, str):
+                raise ValueError("capability_bindings keys and values must be strings.")
+            k = key.strip()
+            val_str = val.strip()
+            if not k:
+                raise ValueError("capability_bindings keys cannot be empty.")
+            if not val_str:
+                raise ValueError(f"capability_bindings value for key '{key}' cannot be empty.")
+            cleaned[k] = val_str
+        return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +254,12 @@ privacy:
 
 storage:
   location: user
+
+# Mapping of static capability keys to runtime tool names for HTTP/MCP adapters:
+# capability_bindings:
+#   "app.py::process_external_document": "knowledge.search"
+#   "app.py::persist_external_instruction": "refund.create"
+capability_bindings: {}
 """
 
 

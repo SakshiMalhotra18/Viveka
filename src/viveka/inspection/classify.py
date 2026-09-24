@@ -241,6 +241,55 @@ def is_default_excluded_dir(dir_name: str) -> bool:
     return dir_name in DEFAULT_EXCLUDED_DIR_NAMES or dir_name.endswith(".egg-info")
 
 
+def is_virtualenv_dir(dir_path: Path) -> bool:
+    """Return True if directory structurally contains Python virtual environment markers.
+
+    Requires pyvenv.cfg plus standard environment structure (Scripts/ or bin/, or Lib/lib).
+    """
+    try:
+        cfg = dir_path / "pyvenv.cfg"
+        if not cfg.is_file():
+            return False
+        has_bin = (dir_path / "Scripts").is_dir() or (dir_path / "bin").is_dir()
+        has_lib = (
+            (dir_path / "Lib").is_dir()
+            or (dir_path / "lib").is_dir()
+            or (dir_path / "lib64").is_dir()
+        )
+        return has_bin or has_lib
+    except (OSError, PermissionError):
+        return False
+
+
+def is_viveka_artifact_dir(rel_path: str) -> bool:
+    """Return True if relative directory path is a generated/private VIVEKA artifact directory.
+
+    Preserves .viveka/properties for source control, while excluding generated evidence
+    directories (.viveka/worlds, .viveka/reductions, .viveka/evaluations, .viveka/diagnoses,
+    .viveka/regressions, .viveka/properties-backup, .viveka/cache, .viveka/runs, etc.).
+    """
+    clean = rel_path.strip("/\\").replace("\\", "/")
+    parts = clean.split("/")
+    if parts and parts[0] == ".viveka":
+        if len(parts) >= 2 and parts[1] != "properties":
+            return True
+    return False
+
+
+def is_viveka_artifact_file(rel_path: str) -> bool:
+    """Return True if relative file path is a generated/private VIVEKA artifact or non-property file.
+
+    Preserves files under .viveka/properties/, while excluding runtime databases,
+    configuration, and backup artifacts from source code analysis.
+    """
+    clean = rel_path.strip("/\\").replace("\\", "/")
+    parts = clean.split("/")
+    if parts and parts[0] == ".viveka":
+        if len(parts) < 2 or parts[1] != "properties":
+            return True
+    return False
+
+
 def is_default_excluded_file(filename: str) -> bool:
     """Return True if filename matches any default file exclusion pattern."""
     for pat in DEFAULT_EXCLUDED_FILE_PATTERNS:

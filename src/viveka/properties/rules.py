@@ -126,7 +126,7 @@ PROPERTY_RULES: tuple[PropertyInferenceRule, ...] = (
         invariant_type=InvariantType.FORBIDDEN_FLOW,
         required_source_tags=(CapabilityTag.RETRIEVAL, CapabilityTag.UNTRUSTED_INPUT),
         required_sink_tags=(CapabilityTag.DATABASE_WRITE,),
-        unless=("schema_validation", "human_approval"),
+        unless=("human_approval",),
         confidence="medium",
         rationale_template=(
             "Target exposes database write capability ({sink_name}) reachable from untrusted inputs. "

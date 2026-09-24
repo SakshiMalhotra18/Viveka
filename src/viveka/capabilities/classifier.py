@@ -101,6 +101,79 @@ _FP_EXECUTION_PLAN_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# Common non-network dictionary / object .get() receivers
+_FP_NON_NETWORK_GET_RECEIVERS: frozenset[str] = frozenset(
+    {
+        "state",
+        "config",
+        "dict",
+        "params",
+        "headers",
+        "environ",
+        "options",
+        "settings",
+        "ctx",
+        "context",
+        "row",
+        "item",
+        "record",
+        "payload",
+        "body",
+        "data",
+        "event",
+        "kwargs",
+        "args",
+    }
+)
+
+
+def callee_matches_pattern(callee: str, pat: str) -> bool:
+    """Check if a callee matches a call pattern respecting attribute and token boundaries.
+
+    Examples:
+        - pat="subprocess.run(": matches "subprocess.run", "foo.subprocess.run", "subprocess.run("
+        - pat=".unlink(": matches "path.unlink", "x.unlink", ".unlink(", but NOT "unlink_all"
+        - pat="open(": matches "open", "builtins.open", "open(", but NOT "reopen" or "open_file"
+        - pat="db.add(": matches "db.add", "self.db.add"
+        - pat="SELECT ": matches "SELECT * FROM ..." (SQL keyword prefixes)
+    """
+    callee_raw = callee.strip()
+
+    # 1. SQL statement prefixes (e.g. "SELECT ", "INSERT ", "UPDATE ", "DELETE ")
+    if pat.endswith(" ") or " " in pat:
+        return callee_raw.upper().startswith(pat.upper())
+
+    callee_clean = callee_raw.rstrip("([")
+    pat_clean = pat.rstrip("([")
+
+    callee_lower = callee_clean.lower()
+    pat_lower = pat_clean.lower()
+
+    # 2. Leading dot pattern (e.g. ".save", ".filter", ".unlink", ".scalars")
+    if pat_lower.startswith("."):
+        attr = pat_lower.lstrip(".")
+        tokens = [t for t in callee_lower.split(".") if t]
+        return attr in tokens
+
+    # 3. Dotted pattern (e.g. "subprocess.run", "os.system", "session.add", "db.query")
+    if "." in pat_lower:
+        pat_tokens = [t for t in pat_lower.split(".") if t]
+        callee_tokens = [t for t in callee_lower.split(".") if t]
+        len_pat = len(pat_tokens)
+        len_callee = len(callee_tokens)
+        for i in range(len_callee - len_pat + 1):
+            if callee_tokens[i : i + len_pat] == pat_tokens:
+                return True
+        return False
+
+    # 4. Special vector library patterns (e.g. "chroma", "pinecone")
+    if pat_lower in ("chroma", "pinecone"):
+        return pat_lower in callee_lower
+
+    # 5. Standalone token / function name pattern (e.g. "open", "read", "eval", "exec", "sendmail")
+    tokens = [t for t in callee_lower.split(".") if t]
+    return pat_lower in tokens
+
 
 def _is_false_positive(
     func: PythonFunction,
@@ -153,16 +226,168 @@ def _is_false_positive(
                 "os.unlink",
                 "shutil.rmtree",
                 "Path.unlink",
-                ".unlink(",
+                ".unlink",
                 "rmtree",
             )
         ):
             return True
 
+    # Process execution: suppress migration runners and non-process calls
+    if rule.id == "RULE-PROC-SHELL-001":
+        call_values_lower = [e.value.lower() for e in call_ev]
+        has_real_shell_call = any(
+            any(
+                sh in cv
+                for sh in (
+                    "subprocess.",
+                    "os.system",
+                    "os.popen",
+                    "os.execv",
+                    "os.execve",
+                )
+            )
+            for cv in call_values_lower
+        )
+        if not has_real_shell_call:
+            return True
+
+    # Network read (GET): suppress dictionary lookups (.get) without HTTP client evidence
+    if rule.id == "RULE-NET-GET-001":
+        call_values_lower = [e.value.lower() for e in call_ev]
+        has_http_client_call = any(
+            any(
+                http in cv
+                for http in (
+                    "requests.",
+                    "httpx.",
+                    "aiohttp.",
+                    "urllib.",
+                    "fetch",
+                    "urlopen",
+                )
+            )
+            for cv in call_values_lower
+        )
+        has_http_import = any(
+            any(http in ev.lower() for http in ("requests", "httpx", "aiohttp", "urllib"))
+            for ev in evidence_values
+        )
+        if not (has_http_client_call or has_http_import):
+            return True
+
+    # Retrieval / Vector search: suppress DB queries and dict searches without vector evidence
+    if rule.id == "RULE-RET-SEARCH-001":
+        has_vector_import = any(
+            any(
+                v in ev.lower()
+                for v in ("chromadb", "pinecone", "weaviate", "qdrant", "faiss", "langchain")
+            )
+            for ev in evidence_values
+        )
+        call_values_lower = [e.value.lower() for e in call_ev]
+        has_vector_call = any(
+            any(
+                v in cv
+                for v in (
+                    "similarity_search",
+                    "as_retriever",
+                    "vectorstore",
+                    "chroma",
+                    "pinecone",
+                    "retrieve",
+                )
+            )
+            for cv in call_values_lower
+        )
+        if not (has_vector_import or has_vector_call):
+            return True
+
     # "execute_plan" style names — planning functions, not code execution
-    if rule.id == "RULE-PROC-EVAL-001" and qname in _FP_EXECUTION_PLAN_NAMES:
-        call_values = [e.value for e in call_ev]
-        if not any("eval(" in cv or "exec(" in cv for cv in call_values):
+    if rule.id == "RULE-PROC-EVAL-001":
+        if qname in _FP_EXECUTION_PLAN_NAMES:
+            call_values = [e.value for e in call_ev]
+            if not any("eval(" in cv or "exec(" in cv for cv in call_values):
+                return True
+        # Suppress if matching calls are database or non-eval execute methods (e.g. db.execute, cursor.execute)
+        call_values_lower = [e.value.lower() for e in call_ev]
+        valid_eval = any(
+            cv in ("eval", "exec", "compile", "__import__")
+            or cv.startswith("builtins.eval")
+            or cv.startswith("builtins.exec")
+            or (
+                ("eval(" in cv or "exec(" in cv)
+                and not any(db in cv for db in ("execute", "executor", "cursor", "db."))
+            )
+            for cv in call_values_lower
+        )
+        if not valid_eval:
+            return True
+
+    # Database write: suppress functions that only perform read queries
+    if rule.id == "RULE-DB-WRITE-001":
+        # Check if function has any mutating database call
+        mutating_patterns = (
+            "session.add",
+            "session.add_all",
+            "session.commit",
+            "session.flush",
+            "session.delete",
+            "session.merge",
+            "session.execute",
+            "db.add",
+            "db.add_all",
+            "db.commit",
+            "db.flush",
+            "db.delete",
+            "db.merge",
+            "db.execute",
+            "sess.add",
+            "sess.add_all",
+            "sess.commit",
+            "sess.flush",
+            "sess.delete",
+            "sess.merge",
+            "sess.execute",
+            "cursor.execute",
+            "insert",
+            "update",
+            "delete",
+            ".save",
+            ".create",
+        )
+        has_mutating_call = False
+        for call in func.calls:
+            callee_lower = call.callee.lower()
+            tokens = callee_lower.split(".")
+            if any(
+                pat in callee_lower or tokens[-1] in ("save", "create", "delete", "insert")
+                for pat in mutating_patterns
+            ):
+                has_mutating_call = True
+                break
+
+        if not has_mutating_call:
+            return True
+
+        has_db_import_or_name = any(
+            any(
+                kw in ev.lower()
+                for kw in (
+                    "sqlalchemy",
+                    "sqlite",
+                    "psycopg",
+                    "mongo",
+                    "django",
+                    "tortoise",
+                    "peewee",
+                    "orm",
+                    "persist",
+                    "record",
+                )
+            )
+            for ev in evidence_values
+        )
+        if not has_db_import_or_name:
             return True
 
     return False
@@ -182,7 +407,7 @@ def _collect_call_evidence(
     evidence: list[CapabilityEvidence] = []
     for call in func.calls:
         for pat in patterns:
-            if pat.lower() in call.callee.lower():
+            if callee_matches_pattern(call.callee, pat):
                 evidence.append(
                     CapabilityEvidence(
                         evidence_type="call",

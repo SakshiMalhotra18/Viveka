@@ -196,6 +196,12 @@ def extract_calls(
             if isinstance(node, ast.Call):
                 callee_str = normalize_callee(node.func)
                 kw_names = [kw.arg for kw in node.keywords if kw.arg is not None]
+                pos_args: list[str] = []
+                for arg in node.args:
+                    try:
+                        pos_args.append(ast.unparse(arg))
+                    except Exception:
+                        pos_args.append("<arg>")
                 line = getattr(node, "lineno", 1)
                 calls.append(
                     PythonCall(
@@ -204,6 +210,7 @@ def extract_calls(
                         containing_symbol=containing_symbol,
                         argument_count=len(node.args),
                         keyword_names=kw_names,
+                        positional_args=pos_args,
                     )
                 )
 

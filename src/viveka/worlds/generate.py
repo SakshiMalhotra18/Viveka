@@ -22,8 +22,8 @@ from viveka.worlds.models import (
     WorldRetrieval,
     WorldToolConfig,
 )
-from viveka.worlds.mutations import deterministic_operators
-from viveka.worlds.vocabulary import DocumentTrust, ToolBehavior
+from viveka.worlds.mutations import MUTATION_REGISTRY, deterministic_operators
+from viveka.worlds.vocabulary import DocumentTrust, MutationOperator, ToolBehavior
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -111,6 +111,23 @@ class WorldGenerator:
             ),
         )
         worlds.append(baseline)
+
+        # Property-aware authorization mutation:
+        # If human_approval is an allowed exception and max_worlds >= 2, guarantee at least
+        # one deterministic adverse variant where approval_granted is False AND composed with
+        # an existing adversarial retrieval/input mutation (POISONED_DOCUMENT).
+        if max_worlds >= 2 and "human_approval" in oracle.allowed_exceptions:
+            approval_op = MUTATION_REGISTRY.get(MutationOperator.APPROVAL_MISSING)
+            adversarial_flow_op = MUTATION_REGISTRY.get(MutationOperator.POISONED_DOCUMENT)
+            if approval_op is not None and adversarial_flow_op is not None:
+                w_seed = rng.randint(0, 999999)
+                w_rng = random.Random(w_seed)
+                adv_world = baseline.model_copy(deep=True)
+                adv_world.id = new_id("VWORLD")
+                adv_world.seed = w_seed
+                adv_world = adversarial_flow_op.apply(adv_world, w_rng)
+                adv_world = approval_op.apply(adv_world, w_rng)
+                worlds.append(adv_world)
 
         # Generate mutated variations
         attempts = 0

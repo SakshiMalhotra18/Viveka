@@ -115,6 +115,49 @@ class TestLoadConfig:
         with pytest.raises(ConfigurationError):
             load_config(cfg_path)
 
+    def test_capability_bindings_valid(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(
+            textwrap.dedent("""\
+                version: 1
+                capability_bindings:
+                  "app.py::process_doc": "knowledge.search"
+                  "app.py::persist_data": "refund.create"
+            """),
+            encoding="utf-8",
+        )
+        cfg = load_config(cfg_path)
+        assert cfg.capability_bindings == {
+            "app.py::process_doc": "knowledge.search",
+            "app.py::persist_data": "refund.create",
+        }
+
+    def test_capability_bindings_empty_key_rejected(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(
+            textwrap.dedent("""\
+                version: 1
+                capability_bindings:
+                  "  ": "knowledge.search"
+            """),
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigurationError, match="empty"):
+            load_config(cfg_path)
+
+    def test_capability_bindings_empty_val_rejected(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(
+            textwrap.dedent("""\
+                version: 1
+                capability_bindings:
+                  "app.py::process_doc": "  "
+            """),
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigurationError, match="empty"):
+            load_config(cfg_path)
+
 
 class TestWriteDefaultConfig:
     def test_creates_file(self, tmp_path: Path) -> None:
@@ -129,6 +172,7 @@ class TestWriteDefaultConfig:
         write_default_config(cfg_path)
         parsed = yaml.safe_load(cfg_path.read_text())
         assert parsed["version"] == 1
+        assert parsed.get("capability_bindings") == {}
 
     def test_write_to_missing_dir_raises(self, tmp_path: Path) -> None:
         cfg_path = tmp_path / "nonexistent" / "config.yaml"

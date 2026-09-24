@@ -94,12 +94,68 @@ class ReplayEngine:
         binding = explicit_binding
 
         if target is None:
-            if self.config is not None and self.config.runtime.command:
-                target = TargetSpec(
-                    adapter_type=RuntimeAdapterType.PYTHON_CALLABLE,
-                    import_path=self.config.runtime.command,
-                    working_directory=self.config.runtime.working_directory,
-                )
+            if self.config is not None:
+                adapter_mode = str(self.config.runtime.adapter).lower()
+                if adapter_mode in ("http", "http_json"):
+                    endpoint = self.config.interface.endpoint or self.config.runtime.command
+                    if not endpoint:
+                        raise ConfigurationError(
+                            "No HTTP endpoint configured in .viveka/config.yaml (interface.endpoint or runtime.command is empty).",
+                            hint="Set interface.endpoint in .viveka/config.yaml or pass target_spec explicitly.",
+                        )
+                    opts = {
+                        "method": self.config.interface.method,
+                        "timeout_seconds": str(self.config.interface.timeout_seconds),
+                        "allow_remote_target": str(
+                            self.config.interface.allow_remote_target
+                        ).lower(),
+                        "max_response_bytes": str(self.config.interface.max_response_bytes),
+                    }
+                    if self.config.interface.auth_header_env:
+                        opts["auth_header_env"] = self.config.interface.auth_header_env
+                    if self.config.interface.healthcheck:
+                        opts["healthcheck"] = self.config.interface.healthcheck
+
+                    target = TargetSpec(
+                        adapter_type=RuntimeAdapterType.HTTP,
+                        endpoint=endpoint,
+                        options=opts,
+                    )
+                elif adapter_mode in ("mcp",):
+                    cmd = self.config.mcp.command or self.config.runtime.command
+                    if not cmd:
+                        raise ConfigurationError(
+                            "No MCP server command configured in .viveka/config.yaml (mcp.command or runtime.command is empty).",
+                            hint="Set mcp.command in .viveka/config.yaml or pass target_spec explicitly.",
+                        )
+                    import json
+
+                    mcp_opts = {
+                        "transport": self.config.mcp.transport,
+                        "command": cmd,
+                        "args": json.dumps(self.config.mcp.args),
+                        "tool": self.config.mcp.tool,
+                        "timeout_seconds": str(self.config.mcp.timeout_seconds),
+                    }
+                    if self.config.mcp.env_from_host:
+                        mcp_opts["env_from_host"] = json.dumps(self.config.mcp.env_from_host)
+
+                    target = TargetSpec(
+                        adapter_type=RuntimeAdapterType.MCP,
+                        options=mcp_opts,
+                    )
+                elif self.config.runtime.command:
+                    target = TargetSpec(
+                        adapter_type=RuntimeAdapterType.PYTHON_CALLABLE,
+                        import_path=self.config.runtime.command,
+                        working_directory=self.config.runtime.working_directory,
+                    )
+                else:
+                    raise ConfigurationError(
+                        "No runtime target configured in .viveka/config.yaml (runtime.command is empty). "
+                        "Replay requires an explicit target agent configuration.",
+                        hint="Set runtime.command in .viveka/config.yaml or pass target_spec explicitly.",
+                    )
             else:
                 raise ConfigurationError(
                     "No runtime target configured in .viveka/config.yaml (runtime.command is empty). "
@@ -108,12 +164,14 @@ class ReplayEngine:
                 )
 
         if binding is None:
-            if target.import_path == "viveka.demo.agent:run_demo_agent":
+            if self.config is not None and self.config.capability_bindings:
+                binding = RuntimeCapabilityBinding(bindings=dict(self.config.capability_bindings))
+            elif target.import_path == "viveka.demo.agent:run_demo_agent":
                 binding = get_demo_capability_binding()
             else:
                 raise ConfigurationError(
-                    f"No capability binding configured for target '{target.import_path}'.",
-                    hint="Define a RuntimeCapabilityBinding for the target tools.",
+                    f"No capability binding configured for target '{target.endpoint or target.import_path}'.",
+                    hint="Define capability_bindings in .viveka/config.yaml or pass an explicit RuntimeCapabilityBinding.",
                 )
 
         return target, binding

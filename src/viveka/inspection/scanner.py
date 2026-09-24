@@ -20,6 +20,9 @@ from viveka.inspection.classify import (
     is_default_excluded_dir,
     is_default_excluded_file,
     is_sensitive_file,
+    is_virtualenv_dir,
+    is_viveka_artifact_dir,
+    is_viveka_artifact_file,
 )
 from viveka.inspection.ignore import IgnoreEngine
 from viveka.inspection.models import Decision, Reason, ScannedFile, ScanSummary
@@ -147,6 +150,32 @@ def scan_repository(
                 # Evaluate directory exclusion rules
                 dir_name = entry.name
                 if is_default_excluded_dir(dir_name):
+                    all_files.append(
+                        ScannedFile(
+                            relative_path=rel_path,
+                            size_bytes=0,
+                            extension="",
+                            decision=Decision.EXCLUDE,
+                            reason=Reason.DEFAULT_EXCLUSION,
+                            is_symlink=is_symlink,
+                        )
+                    )
+                    continue
+
+                if is_virtualenv_dir(entry_path):
+                    all_files.append(
+                        ScannedFile(
+                            relative_path=rel_path,
+                            size_bytes=0,
+                            extension="",
+                            decision=Decision.EXCLUDE,
+                            reason=Reason.DEFAULT_EXCLUSION,
+                            is_symlink=is_symlink,
+                        )
+                    )
+                    continue
+
+                if is_viveka_artifact_dir(rel_path):
                     all_files.append(
                         ScannedFile(
                             relative_path=rel_path,
@@ -328,7 +357,7 @@ def scan_repository(
                     continue
 
                 # 5. Default File Exclusions
-                if is_default_excluded_file(filename):
+                if is_default_excluded_file(filename) or is_viveka_artifact_file(rel_path):
                     scanned = ScannedFile(
                         relative_path=rel_path,
                         size_bytes=size_bytes,

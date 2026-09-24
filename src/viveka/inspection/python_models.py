@@ -82,6 +82,10 @@ class PythonCall(BaseModel):
     keyword_names: list[str] = Field(
         default_factory=list, description="Names of keyword arguments."
     )
+    positional_args: list[str] = Field(
+        default_factory=list,
+        description="Text representations of positional arguments (e.g. string literals, symbol names).",
+    )
 
 
 class PythonFunction(BaseModel):

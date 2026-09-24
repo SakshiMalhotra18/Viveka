@@ -25,11 +25,13 @@ from viveka.capabilities import (
     classify_capabilities,
     infer_trust_boundaries,
 )
+from viveka.capabilities.vocabulary import CapabilityTag
 from viveka.inspection.analyzer import analyze_python_repository
 from viveka.inspection.scanner import scan_repository
 from viveka.properties.engine import infer_candidate_properties
+from viveka.properties.rules import PROPERTY_RULES
 from viveka.properties.store import PropertyNotFoundError, PropertyStore
-from viveka.properties.vocabulary import PropertyStatus
+from viveka.properties.vocabulary import InvariantType, PropertyStatus
 from viveka.reporting.console import BRAND_HEADER, OK, console
 
 properties_app = typer.Typer(
@@ -132,6 +134,75 @@ def list_properties(
     console.print()
 
 
+def _classify_zero_result(
+    capabilities: list,
+) -> str:
+    """Classify a zero-Property result into Case A, B, or C.
+
+    Uses existing PROPERTY_RULES tag requirements read-only.
+    Does NOT duplicate or alter inference semantics.
+
+    Returns ``"a"``, ``"b"``, or ``"c"``.
+    """
+    if not capabilities:
+        return "a"
+
+    # Collect all tags present across detected capabilities
+    cap_tags: set[CapabilityTag] = set()
+    for cap in capabilities:
+        for tag in cap.tags:
+            cap_tags.add(tag)
+
+    # Check whether any flow rule has both source-tag and sink-tag matches
+    for rule in PROPERTY_RULES:
+        if rule.invariant_type == InvariantType.MUST_HANDLE_FAILURE:
+            continue
+        has_source = bool(set(rule.required_source_tags) & cap_tags)
+        has_sink = bool(set(rule.required_sink_tags) & cap_tags)
+        if has_source and has_sink:
+            return "c"
+
+    return "b"
+
+
+def _print_zero_result_explanation(
+    case: str,
+    target_root: Path,
+) -> None:
+    """Print a deterministic explanation for a zero-Property result."""
+    console.print("[muted]No candidate Properties were inferred.[/]")
+    console.print()
+    console.print("  [muted]Why:[/]")
+    if case == "a":
+        console.print(
+            "    VIVEKA did not recognize capabilities that match its current V1\n"
+            "    behavioral Property rules."
+        )
+    elif case == "c":
+        console.print(
+            "    Relevant source and sink capabilities were detected, but VIVEKA found\n"
+            "    no supported directed source -> sink interaction that satisfies the\n"
+            "    current V1 Property rules."
+        )
+    else:
+        # Case B
+        console.print(
+            "    VIVEKA found capabilities, but none formed an applicable source/sink\n"
+            "    combination for the current V1 Property rules."
+        )
+
+    console.print()
+    console.print("  [muted]This result is not a safety determination.[/]")
+    console.print(
+        "  [muted]It means no V1 Property could be justified from the static evidence[/]\n"
+        "  [muted]VIVEKA found.[/]"
+    )
+    console.print()
+    console.print("  [info]Review detected behavior:[/]")
+    console.print(f"    [brand]viveka inspect {target_root}[/]")
+    console.print()
+
+
 @properties_app.command("suggest")
 def suggest_properties(
     path: Annotated[
@@ -221,8 +292,8 @@ def suggest_properties(
         )
         console.print()
     elif not inferred:
-        console.print("[muted]No candidate properties inferred from current capabilities.[/]")
-        console.print()
+        case = _classify_zero_result(capabilities)
+        _print_zero_result_explanation(case, target_root)
     else:
         console.print(
             "[info]All inferred candidate properties already exist in .viveka/properties/.[/]"

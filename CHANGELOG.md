@@ -8,6 +8,34 @@ VIVEKA uses [Semantic Versioning](https://semver.org/).
 ---
 
 ## [Unreleased]
+## [0.1.4] — 2026-09-24
+
+### Added
+- Added declarative `capability_bindings` configuration for explicit static-capability-to-runtime-tool mappings.
+- Added config-based capability binding resolution for verification and behavioral regression replay.
+- Added focused regression coverage for HTTP and MCP target binding resolution.
+- Added real-world LangGraph and SQLAlchemy static-analysis regression coverage.
+
+### Changed
+- Improved Python static analysis for LangGraph workflows, including directed graph reachability and conditional edges.
+- Improved SQLAlchemy capability recognition and database read/write distinction.
+- Tightened capability-call matching to reduce substring and generic-call false positives.
+- Improved zero-property CLI reporting to distinguish unsupported evidence from absence of recognized capabilities.
+- Improved FlowForbidden World generation so human-approval properties include an adversarial retrieval World with missing approval.
+- Restricted automatic demo capability bindings to the exact bundled demo target; arbitrary HTTP and MCP targets now require explicit or configured bindings.
+
+### Fixed
+- Reduced false-positive capability inference from broad call patterns such as generic `run`, `get`, `post`, `query`, and `search` matches.
+- Corrected the untrusted-input-to-database-write Property rule so `human_approval` is the applicable V1 exception rather than unsupported schema-validation evidence.
+- Fixed virtual-environment and generated-artifact scanning exclusions.
+- Fixed MCP integration tests to comply with the explicit capability-binding contract.
+
+### Validation
+- Full test suite: 560 passed.
+- Ruff lint and formatting checks passed.
+- Positive HTTP dogfood verified Property → World → runtime → telemetry → reproduction → reduction → diagnosis → regression → replay.
+- Config-only `viveka verify` and `viveka replay` workflows validated against an instrumented local HTTP target.
+
 
 ## [0.1.3] — 2026-09-22
 

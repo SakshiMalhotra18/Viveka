@@ -102,3 +102,105 @@ class TestPropertiesCLI:
         """viveka properties edit was removed from V1 to protect automatic revision history."""
         result = runner.invoke(app, ["properties", "edit", "some-id", "--path", str(tmp_path)])
         assert result.exit_code != 0
+
+    def test_suggest_zero_candidates_case_a(self, tmp_path: Path) -> None:
+        """Case A: No capabilities recognized in target repository."""
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname='empty-agent'\n", encoding="utf-8"
+        )
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "math_utils.py").write_text(
+            "def add(a: int, b: int) -> int:\n    return a + b\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["properties", "suggest", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "Capabilities analyzed" in result.output
+        assert "Total candidates inferred" in result.output
+        assert "No candidate Properties were inferred." in result.output
+        assert "VIVEKA did not recognize capabilities that match its current V1" in result.output
+        assert "This result is not a safety determination." in result.output
+        assert "viveka inspect" in result.output
+
+    def test_suggest_zero_candidates_case_b(self, tmp_path: Path) -> None:
+        """Case B: Capabilities exist, but no applicable source/sink combination."""
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='read-agent'\n", encoding="utf-8")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "reader.py").write_text(
+            "def get_user_data(db, user_id: int):\n"
+            "    return db.query(user_id).filter_by(active=True).all()\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["properties", "suggest", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "Capabilities analyzed" in result.output
+        assert "Total candidates inferred" in result.output
+        assert "No candidate Properties were inferred." in result.output
+        assert "none formed an applicable source/sink" in result.output
+        assert "This result is not a safety determination." in result.output
+
+    def test_suggest_zero_candidates_case_c(self, tmp_path: Path) -> None:
+        """Case C: Relevant source and sink exist, but no directed interaction."""
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname='split-agent'\n", encoding="utf-8"
+        )
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "searcher.py").write_text(
+            "import chromadb\n"
+            "def query_docs(query_text: str):\n"
+            "    client = chromadb.Client()\n"
+            "    collection = client.get_collection('docs')\n"
+            "    return collection.query(query_texts=[query_text])\n",
+            encoding="utf-8",
+        )
+        (src / "writer.py").write_text(
+            "def persist_data(db, item):\n    db.add(item)\n    db.commit()\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(app, ["properties", "suggest", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "Capabilities analyzed" in result.output
+        assert "Total candidates inferred" in result.output
+        assert "No candidate Properties were inferred." in result.output
+        assert (
+            "Relevant source and sink capabilities were detected, but VIVEKA found" in result.output
+        )
+        assert "no supported directed source -> sink interaction" in result.output
+        assert "This result is not a safety determination." in result.output
+
+    def test_suggest_zero_result_safety_disclaimer(self, tmp_path: Path) -> None:
+        """Zero-result output must never use overclaiming safety language."""
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test-pkg'\n", encoding="utf-8")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["properties", "suggest", str(tmp_path)])
+        assert result.exit_code == 0
+        output_lower = result.output.lower()
+        # Must not claim safety / proof
+        assert "application is safe" not in output_lower
+        assert "verified safe" not in output_lower
+        assert "no vulnerabilities" not in output_lower
+        assert "proved" not in output_lower
+
+    def test_suggest_zero_candidates_json(self, tmp_path: Path) -> None:
+        """JSON output contract must be preserved for zero-candidate results."""
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='json-agent'\n", encoding="utf-8")
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["properties", "suggest", str(tmp_path), "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["schema_version"] == 1
+        assert data["suggested_total"] == 0
+        assert data["new_candidates"] == []
+        assert data["existing_preserved"] == []

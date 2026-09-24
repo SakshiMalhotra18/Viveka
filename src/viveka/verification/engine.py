@@ -157,14 +157,14 @@ class VerificationEngine:
                 )
 
         if binding is None:
-            if target.import_path == "viveka.demo.agent:run_demo_agent" or str(
-                target.adapter_type
-            ).lower() in ("http", "http_json", "mcp"):
+            if self.config is not None and self.config.capability_bindings:
+                binding = RuntimeCapabilityBinding(bindings=dict(self.config.capability_bindings))
+            elif target.import_path == "viveka.demo.agent:run_demo_agent":
                 binding = get_demo_capability_binding()
             else:
                 raise ConfigurationError(
                     f"No capability binding configured for target '{target.endpoint or target.import_path}'.",
-                    hint="Define a RuntimeCapabilityBinding for the target tools.",
+                    hint="Define capability_bindings in .viveka/config.yaml or pass an explicit RuntimeCapabilityBinding.",
                 )
 
         return target, binding

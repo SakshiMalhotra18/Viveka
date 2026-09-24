@@ -14,7 +14,7 @@ import pytest
 from tests.http_runtime.reference_server import ReferenceHTTPServer
 
 from viveka.core.config import VivekaConfig, write_default_config
-from viveka.evaluation.models import ReproductionPolicy
+from viveka.evaluation.models import ReproductionPolicy, RuntimeCapabilityBinding
 from viveka.properties.models import FailureHandledOracle, FlowForbiddenOracle, Property
 from viveka.properties.store import PropertyStore
 from viveka.properties.vocabulary import PropertyStatus
@@ -45,6 +45,10 @@ def test_http_verification_engine_resolution(
     config.runtime.adapter = "http"
     config.interface.endpoint = http_server.endpoint_url
     config.reasoning.mode = "none"  # reasoning.mode=none remains independent
+    config.capability_bindings = {
+        "knowledge_search": "knowledge.search",
+        "refund_create": "refund.create",
+    }
 
     prop_store = PropertyStore(tmp_path)
     prop = Property(
@@ -66,6 +70,7 @@ def test_http_verification_engine_resolution(
     assert target.adapter_type == RuntimeAdapterType.HTTP
     assert target.endpoint == http_server.endpoint_url
     assert binding is not None
+    assert binding.bindings == config.capability_bindings
 
 
 def test_output_only_flow_forbidden_oracle_returns_inconclusive(
@@ -93,6 +98,12 @@ def test_output_only_flow_forbidden_oracle_returns_inconclusive(
         target_spec=TargetSpec(
             adapter_type=RuntimeAdapterType.HTTP,
             endpoint=http_server.endpoint_url,
+        ),
+        binding=RuntimeCapabilityBinding(
+            bindings={
+                "knowledge_search": "knowledge.search",
+                "refund_create": "refund.create",
+            }
         ),
     )
 
@@ -129,6 +140,7 @@ def test_output_only_failure_handled_oracle_returns_inconclusive(
             adapter_type=RuntimeAdapterType.HTTP,
             endpoint=http_server.endpoint_url,
         ),
+        binding=RuntimeCapabilityBinding(bindings={"knowledge_search": "knowledge.search"}),
     )
 
     assert result.outcome == VerificationOutcome.NO_REPRODUCED_VIOLATIONS
@@ -164,6 +176,12 @@ def test_instrumented_http_telemetry_evaluates_flow_forbidden(
         target_spec=TargetSpec(
             adapter_type=RuntimeAdapterType.HTTP,
             endpoint=instrumented_endpoint,
+        ),
+        binding=RuntimeCapabilityBinding(
+            bindings={
+                "src/search.py::knowledge_search": "knowledge_search",
+                "src/refund.py::refund_create": "refund_create",
+            }
         ),
     )
 
